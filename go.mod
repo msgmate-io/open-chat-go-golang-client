@@ -1,4 +1,4 @@
-module github.com/msgmate-io/go-client-integration
+module github.com/msgmate-io/open-chat-go-golang-client
 
 go 1.25.10
 
