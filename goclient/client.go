@@ -8,6 +8,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -334,13 +335,55 @@ func (c *Client) GetChat(chatUUID string) (error, ListedChat) {
 		return c.initErr, ListedChat{}
 	}
 	resp, err := c.api.GetApiV1ChatsChatUuidWithResponse(context.Background(), chatUUID)
-	if err != nil {
-		return err, ListedChat{}
+	if err == nil && resp != nil && resp.HTTPResponse != nil && resp.JSON200 != nil {
+		return nil, convertListedChat(*resp.JSON200)
 	}
-	if resp == nil || resp.HTTPResponse == nil || resp.JSON200 == nil {
-		return fmt.Errorf("get chat failed: empty response"), ListedChat{}
+
+	fallbackURL := fmt.Sprintf("%s/api/v1/chats/%s", c.host, url.PathEscape(chatUUID))
+	req, reqErr := http.NewRequest(http.MethodGet, fallbackURL, nil)
+	if reqErr != nil {
+		if err != nil {
+			return err, ListedChat{}
+		}
+		return reqErr, ListedChat{}
 	}
-	return nil, convertListedChat(*resp.JSON200)
+	if editorErr := c.requestEditor(context.Background(), req); editorErr != nil {
+		return editorErr, ListedChat{}
+	}
+
+	httpResp, httpErr := http.DefaultClient.Do(req)
+	if httpErr != nil {
+		if err != nil {
+			return err, ListedChat{}
+		}
+		return httpErr, ListedChat{}
+	}
+	defer httpResp.Body.Close()
+
+	if httpResp.StatusCode != http.StatusOK {
+		if err != nil {
+			return err, ListedChat{}
+		}
+		return fmt.Errorf("get chat failed: status %s", httpResp.Status), ListedChat{}
+	}
+
+	var payload map[string]interface{}
+	if decodeErr := json.NewDecoder(httpResp.Body).Decode(&payload); decodeErr != nil {
+		if err != nil {
+			return err, ListedChat{}
+		}
+		return decodeErr, ListedChat{}
+	}
+
+	return nil, ListedChat{
+		UUID:          mapString(payload, "uuid"),
+		Partner:       payload["partner"],
+		LatestMessage: payload["latest_message"],
+		ChatType:      mapString(payload, "chat_type"),
+		Config:        payload["config"],
+		ChatShareUUID: mapString(payload, "chat_share_uuid"),
+		SharedChatURL: mapString(payload, "shared_interaction_url"),
+	}
 }
 
 func (c *Client) ListContacts(page int64, limit int64) (error, PaginatedContacts) {
@@ -486,6 +529,21 @@ func derefInt(v *int) int {
 		return 0
 	}
 	return *v
+}
+
+func mapString(payload map[string]interface{}, key string) string {
+	if payload == nil {
+		return ""
+	}
+	raw, ok := payload[key]
+	if !ok {
+		return ""
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return ""
+	}
+	return value
 }
 
 func readBody(resp *http.Response) string {
