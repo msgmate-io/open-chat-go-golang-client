@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	generatedapi "github.com/msgmate-io/open-chat-go-golang-client/generated_api"
+	generatedapi "github.com/msgmate-io/go-client-integration/generated_api"
 )
 
 type SendMessage struct {

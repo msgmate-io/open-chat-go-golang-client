@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/msgmate-io/open-chat-go-golang-client/goclient"
+	"github.com/msgmate-io/go-client-integration/goclient"
 	"github.com/urfave/cli/v3"
 	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/term"
