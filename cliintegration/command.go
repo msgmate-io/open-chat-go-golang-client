@@ -6,9 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -45,6 +43,49 @@ var defaultFlags = []cli.Flag{
 		Value:   "",
 		Sources: cli.EnvVars("OPEN_CHAT_API_TOKEN"),
 	},
+	&cli.BoolFlag{
+		Name:  "json",
+		Usage: "Print raw JSON response",
+		Value: false,
+	},
+}
+
+var (
+	clientCommandRegistryMu sync.RWMutex
+	clientCommandRegistry   = map[string]*cli.Command{}
+)
+
+func RegisterClientCommand(cmd *cli.Command) error {
+	if cmd == nil {
+		return fmt.Errorf("client command is required")
+	}
+	name := strings.TrimSpace(cmd.Name)
+	if name == "" {
+		return fmt.Errorf("client command name is required")
+	}
+	clientCommandRegistryMu.Lock()
+	defer clientCommandRegistryMu.Unlock()
+	if _, exists := clientCommandRegistry[name]; exists {
+		return fmt.Errorf("client command %q already registered", name)
+	}
+	clientCommandRegistry[name] = cmd
+	return nil
+}
+
+func MustRegisterClientCommand(cmd *cli.Command) {
+	if err := RegisterClientCommand(cmd); err != nil {
+		panic(err)
+	}
+}
+
+func registeredClientCommands() []*cli.Command {
+	clientCommandRegistryMu.RLock()
+	defer clientCommandRegistryMu.RUnlock()
+	out := make([]*cli.Command, 0, len(clientCommandRegistry))
+	for _, cmd := range clientCommandRegistry {
+		out = append(out, cmd)
+	}
+	return out
 }
 
 func GetClientCmd(action string) *cli.Command {
@@ -53,6 +94,8 @@ func GetClientCmd(action string) *cli.Command {
 		return clientLoginCmd()
 	case "auth":
 		return clientAuthCmd()
+	case "get":
+		return clientGetCmd()
 	case "chats":
 		return clientChatsCmd()
 	case "hash-password":
@@ -63,14 +106,61 @@ func GetClientCmd(action string) *cli.Command {
 }
 
 func ClientCli() *cli.Command {
+	commands := []*cli.Command{
+		clientAuthCmd(),
+		clientLoginCmd(),
+		clientGetCmd(),
+		clientChatsCmd(),
+		clientHashPasswordCmd(),
+	}
+	commands = append(commands, registeredClientCommands()...)
 	return &cli.Command{
-		Name:  "client",
-		Usage: "Open Chat client utilities",
-		Commands: []*cli.Command{
-			clientAuthCmd(),
-			clientLoginCmd(),
-			clientChatsCmd(),
-			clientHashPasswordCmd(),
+		Name:     "client",
+		Usage:    "Open Chat client utilities",
+		Commands: commands,
+	}
+}
+
+func ResolveHostAndAPIToken(c *cli.Command) (string, string, error) {
+	host := getHostWithPrecedence(c)
+	apiToken := strings.TrimSpace(c.String("api-token"))
+	if apiToken == "" {
+		stored, err := loadStoredAuthConfig()
+		if err == nil {
+			if stored.AccessToken != "" && sameHost(stored.Host, host) {
+				apiToken = stored.AccessToken
+			}
+		}
+	}
+	if apiToken == "" {
+		return host, "", fmt.Errorf("no API token available, run `open-chat client auth` first")
+	}
+	return host, apiToken, nil
+}
+
+func ResolveAuthenticatedClient(c *cli.Command) (*goclient.Client, string, error) {
+	host, apiToken, err := ResolveHostAndAPIToken(c)
+	if err != nil {
+		return nil, "", err
+	}
+	ocClient := goclient.NewClient(host)
+	ocClient.SetAccessToken(apiToken)
+	return ocClient, host, nil
+}
+
+func ClientAuthFlags() []cli.Flag {
+	return []cli.Flag{
+		&cli.StringFlag{
+			Name:    "host",
+			Usage:   "The host to connect to",
+			Value:   "http://localhost:1984",
+			Sources: cli.EnvVars("OPEN_CHAT_HOST"),
+		},
+		&cli.StringFlag{
+			Name:    "api-token",
+			Usage:   "Bearer API token to use for auth",
+			Value:   "",
+			Sources: cli.EnvVars("OPEN_CHAT_API_TOKEN"),
 		},
 	}
 }
@@ -87,7 +177,7 @@ func clientAuthCmd() *cli.Command {
 			},
 			&cli.DurationFlag{
 				Name:  "timeout",
-				Usage: "Maximum wait time for browser auth callback",
+				Usage: "Maximum wait time for browser auth completion",
 				Value: 2 * time.Minute,
 			},
 		}...),
@@ -103,50 +193,7 @@ func clientAuthCmd() *cli.Command {
 				return fmt.Errorf("failed to create auth state: %w", err)
 			}
 
-			ln, err := net.Listen("tcp", "127.0.0.1:0")
-			if err != nil {
-				return fmt.Errorf("failed to start callback listener: %w", err)
-			}
-			defer ln.Close()
-
-			callbackURL := "http://" + ln.Addr().String() + "/callback"
-			authURL := buildBrowserAuthURL(host, callbackURL, state, tokenName)
-
-			tokenCh := make(chan string, 1)
-			errCh := make(chan error, 1)
-			server := &http.Server{}
-			mux := http.NewServeMux()
-			var once sync.Once
-			mux.HandleFunc("GET /callback", func(w http.ResponseWriter, r *http.Request) {
-				query := r.URL.Query()
-				if query.Get("state") != state {
-					http.Error(w, "Invalid auth state", http.StatusBadRequest)
-					once.Do(func() { errCh <- fmt.Errorf("invalid auth state") })
-					return
-				}
-				if rawErr := strings.TrimSpace(query.Get("error")); rawErr != "" {
-					http.Error(w, rawErr, http.StatusBadRequest)
-					once.Do(func() { errCh <- errors.New(rawErr) })
-					return
-				}
-				token := strings.TrimSpace(query.Get("token"))
-				if token == "" {
-					http.Error(w, "Missing token", http.StatusBadRequest)
-					once.Do(func() { errCh <- fmt.Errorf("missing token in callback") })
-					return
-				}
-
-				w.Header().Set("Content-Type", "text/html; charset=utf-8")
-				_, _ = w.Write([]byte("<html><body><h2>Open Chat CLI authenticated.</h2><p>You can close this window.</p></body></html>"))
-				once.Do(func() { tokenCh <- token })
-			})
-			server.Handler = mux
-
-			go func() {
-				if serveErr := server.Serve(ln); serveErr != nil && serveErr != http.ErrServerClosed {
-					once.Do(func() { errCh <- serveErr })
-				}
-			}()
+			authURL := buildBrowserAuthURL(host, state, tokenName)
 
 			fmt.Printf("Opening browser for Open Chat auth: %s\n", authURL)
 			if err := openBrowser(authURL); err != nil {
@@ -158,29 +205,34 @@ func clientAuthCmd() *cli.Command {
 				timeout = 2 * time.Minute
 			}
 
-			select {
-			case token := <-tokenCh:
-				_ = server.Shutdown(context.Background())
-				verificationClient := goclient.NewClient(host)
-				verificationClient.SetAccessToken(token)
-				if verifyErr, _ := verificationClient.GetUserInfo(); verifyErr != nil {
-					return fmt.Errorf("received token is invalid: %w", verifyErr)
+			deadline := time.Now().Add(timeout)
+			for {
+				if time.Now().After(deadline) {
+					return fmt.Errorf("browser auth timed out after %s", timeout)
 				}
-				if err := saveStoredAuthConfig(storedAuthConfig{
-					Host:        host,
-					AccessToken: token,
-					UpdatedAt:   time.Now().UTC().Format(time.RFC3339),
-				}); err != nil {
-					return fmt.Errorf("failed to persist token config: %w", err)
+
+				token, ready, pollErr := pollForBrowserAuthResult(host, state)
+				if pollErr != nil {
+					return pollErr
 				}
-				fmt.Println("Client auth successful. Token saved to local config.")
-				return nil
-			case waitErr := <-errCh:
-				_ = server.Shutdown(context.Background())
-				return fmt.Errorf("browser auth failed: %w", waitErr)
-			case <-time.After(timeout):
-				_ = server.Shutdown(context.Background())
-				return fmt.Errorf("browser auth timed out after %s", timeout)
+				if ready {
+					verificationClient := goclient.NewClient(host)
+					verificationClient.SetAccessToken(token)
+					if verifyErr, _ := verificationClient.GetUserInfo(); verifyErr != nil {
+						return fmt.Errorf("received token is invalid: %w", verifyErr)
+					}
+					if err := saveStoredAuthConfig(storedAuthConfig{
+						Host:        host,
+						AccessToken: token,
+						UpdatedAt:   time.Now().UTC().Format(time.RFC3339),
+					}); err != nil {
+						return fmt.Errorf("failed to persist token config: %w", err)
+					}
+					fmt.Println("Client auth successful. Token saved to local config.")
+					return nil
+				}
+
+				time.Sleep(2 * time.Second)
 			}
 		},
 	}
@@ -265,35 +317,105 @@ func clientChatsCmd() *cli.Command {
 			&cli.IntFlag{Name: "limit", Usage: "The number of chats to return", Value: 20},
 		}...),
 		Action: func(_ context.Context, c *cli.Command) error {
-			host := getHostWithPrecedence(c)
-			ocClient := goclient.NewClient(host)
-
-			apiToken := strings.TrimSpace(c.String("api-token"))
-			if apiToken == "" {
-				stored, err := loadStoredAuthConfig()
-				if err == nil {
-					if stored.AccessToken != "" && sameHost(stored.Host, host) {
-						apiToken = stored.AccessToken
-					}
-				}
+			ocClient, _, err := ResolveAuthenticatedClient(c)
+			if err != nil {
+				return err
 			}
-			if apiToken == "" {
-				return fmt.Errorf("no API token available, run `open-chat client auth` first")
-			}
-			ocClient.SetAccessToken(apiToken)
 
 			err, paginatedChats := ocClient.GetChats(int64(c.Int("page")), int64(c.Int("limit")))
 			if err != nil {
 				return fmt.Errorf("failed to get chats: %w", err)
 			}
-			pretty, err := json.MarshalIndent(paginatedChats, "", "  ")
-			if err != nil {
-				return fmt.Errorf("failed to marshal chats: %w", err)
-			}
-			fmt.Println(string(pretty))
-			return nil
+			return printAPIResponse(paginatedChats, c.Bool("json"), goclient.FormatPaginatedChatsReadable)
 		},
 	}
+}
+
+func clientGetCmd() *cli.Command {
+	return &cli.Command{
+		Name:  "get",
+		Usage: "Get resources (kubectl-style)",
+		Commands: []*cli.Command{
+			{
+				Name:      "chat",
+				Usage:     "Get one chat by UUID",
+				ArgsUsage: "<chat-uuid>",
+				Flags:     append(defaultFlags, []cli.Flag{}...),
+				Action: func(_ context.Context, c *cli.Command) error {
+					chatUUID, err := requireSingleArg(c, "chat-uuid")
+					if err != nil {
+						return err
+					}
+
+					ocClient, _, err := ResolveAuthenticatedClient(c)
+					if err != nil {
+						return err
+					}
+
+					err, chat := ocClient.GetChat(chatUUID)
+					if err != nil {
+						return fmt.Errorf("failed to get chat: %w", err)
+					}
+					return printAPIResponse(chat, c.Bool("json"), goclient.FormatListedChatReadable)
+				},
+			},
+			{
+				Name:      "messages",
+				Usage:     "Get messages for a chat UUID",
+				ArgsUsage: "<chat-uuid>",
+				Flags: append(defaultFlags, []cli.Flag{
+					&cli.IntFlag{Name: "page", Usage: "The page number to return", Value: 1},
+					&cli.IntFlag{Name: "limit", Usage: "The number of messages to return", Value: 20},
+				}...),
+				Action: func(_ context.Context, c *cli.Command) error {
+					chatUUID, err := requireSingleArg(c, "chat-uuid")
+					if err != nil {
+						return err
+					}
+
+					ocClient, _, err := ResolveAuthenticatedClient(c)
+					if err != nil {
+						return err
+					}
+
+					err, paginatedMessages := ocClient.GetMessages(chatUUID, int64(c.Int("page")), int64(c.Int("limit")))
+					if err != nil {
+						return fmt.Errorf("failed to get messages: %w", err)
+					}
+					return printAPIResponse(paginatedMessages, c.Bool("json"), goclient.FormatPaginatedMessagesReadable)
+				},
+			},
+		},
+	}
+}
+
+func requireSingleArg(c *cli.Command, argName string) (string, error) {
+	if c.Args().Len() != 1 {
+		return "", fmt.Errorf("expected exactly one argument: <%s>", argName)
+	}
+	value := strings.TrimSpace(c.Args().First())
+	if value == "" {
+		return "", fmt.Errorf("argument <%s> cannot be empty", argName)
+	}
+	return value, nil
+}
+
+func printAPIResponse[T any](value T, asJSON bool, readableFormatter func(T) (string, error)) error {
+	if !asJSON && readableFormatter != nil {
+		readable, err := readableFormatter(value)
+		if err != nil {
+			return err
+		}
+		fmt.Println(readable)
+		return nil
+	}
+
+	pretty, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON response: %w", err)
+	}
+	fmt.Println(string(pretty))
+	return nil
 }
 
 func sameHost(a, b string) bool {
@@ -334,13 +456,44 @@ func getHostWithPrecedence(c *cli.Command) string {
 	return "http://localhost:1984"
 }
 
-func buildBrowserAuthURL(host, redirectURI, state, tokenName string) string {
+func buildBrowserAuthURL(host, state, tokenName string) string {
 	base := strings.TrimRight(strings.TrimSpace(host), "/")
 	v := url.Values{}
-	v.Set("redirect_uri", redirectURI)
 	v.Set("state", state)
 	v.Set("name", tokenName)
 	return base + "/api/user/cli-auth?" + v.Encode()
+}
+
+func pollForBrowserAuthResult(host, state string) (token string, ready bool, err error) {
+	base := strings.TrimRight(strings.TrimSpace(host), "/")
+	pollURL := base + "/api/user/cli-auth/poll?state=" + url.QueryEscape(state)
+
+	resp, reqErr := http.Get(pollURL)
+	if reqErr != nil {
+		return "", false, fmt.Errorf("failed to poll browser auth: %w", reqErr)
+	}
+	defer resp.Body.Close()
+
+	var payload struct {
+		Ready bool   `json:"ready"`
+		Token string `json:"token"`
+		Error string `json:"error"`
+	}
+	if decodeErr := json.NewDecoder(resp.Body).Decode(&payload); decodeErr != nil {
+		return "", false, fmt.Errorf("failed to decode auth poll response: %w", decodeErr)
+	}
+
+	if payload.Error != "" {
+		return "", false, fmt.Errorf("browser auth failed: %s", payload.Error)
+	}
+	if !payload.Ready {
+		return "", false, nil
+	}
+	if strings.TrimSpace(payload.Token) == "" {
+		return "", false, fmt.Errorf("browser auth completed without token")
+	}
+
+	return strings.TrimSpace(payload.Token), true, nil
 }
 
 func randomHex(byteLen int) (string, error) {
