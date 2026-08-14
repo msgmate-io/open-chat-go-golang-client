@@ -6,7 +6,10 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -28,6 +31,11 @@ type storedAuthConfig struct {
 	Host        string `json:"host"`
 	AccessToken string `json:"access_token"`
 	UpdatedAt   string `json:"updated_at"`
+}
+
+type accessTokenCreateResponse struct {
+	Success bool   `json:"success"`
+	Token   string `json:"token"`
 }
 
 var defaultFlags = []cli.Flag{
@@ -53,6 +61,16 @@ var defaultFlags = []cli.Flag{
 var (
 	clientCommandRegistryMu sync.RWMutex
 	clientCommandRegistry   = map[string]*cli.Command{}
+
+	autoServerMu      sync.Mutex
+	autoServerStarted bool
+	autoServerHost    string
+	autoServerCmd     *exec.Cmd
+
+	errNoAutoAuthCredentials = errors.New("no config/env credentials available for auto-auth")
+
+	configEnvCacheMu sync.Mutex
+	configEnvCache   = map[string]map[string]string{}
 )
 
 func RegisterClientCommand(cmd *cli.Command) error {
@@ -123,6 +141,9 @@ func ClientCli() *cli.Command {
 
 func ResolveHostAndAPIToken(c *cli.Command) (string, string, error) {
 	host := getHostWithPrecedence(c)
+	if _, err := ensureServerReachable(host); err != nil {
+		return host, "", err
+	}
 	apiToken := strings.TrimSpace(c.String("api-token"))
 	if apiToken == "" {
 		stored, err := loadStoredAuthConfig()
@@ -131,6 +152,13 @@ func ResolveHostAndAPIToken(c *cli.Command) (string, string, error) {
 				apiToken = stored.AccessToken
 			}
 		}
+	}
+	if apiToken == "" {
+		autoToken, err := autoAuthenticateFromRuntimeConfig(c, host, false)
+		if err != nil && !errors.Is(err, errNoAutoAuthCredentials) {
+			return host, "", err
+		}
+		apiToken = strings.TrimSpace(autoToken)
 	}
 	if apiToken == "" {
 		return host, "", fmt.Errorf("no API token available, run `open-chat client auth` first")
@@ -183,6 +211,14 @@ func clientAuthCmd() *cli.Command {
 		}...),
 		Action: func(_ context.Context, c *cli.Command) error {
 			host := getHostWithPrecedence(c)
+			if _, err := ensureServerReachable(host); err != nil {
+				return err
+			}
+
+			if token, err := autoAuthenticateFromRuntimeConfig(c, host, true); err == nil && strings.TrimSpace(token) != "" {
+				fmt.Println("Client auth successful via config/env credentials. Token saved to local config.")
+				return nil
+			}
 			tokenName := strings.TrimSpace(c.String("token-name"))
 			if tokenName == "" {
 				tokenName = "open-chat-cli"
@@ -444,16 +480,342 @@ func clientHashPasswordCmd() *cli.Command {
 }
 
 func getHostWithPrecedence(c *cli.Command) string {
-	if c != nil && c.IsSet("host") {
-		return strings.TrimRight(strings.TrimSpace(c.String("host")), "/")
+	if envHost := envOrConfigValue(c, "OPEN_CHAT_HOST"); envHost != "" {
+		return normalizeHost(envHost)
 	}
-	if envHost := strings.TrimSpace(os.Getenv("OPEN_CHAT_HOST")); envHost != "" {
-		return strings.TrimRight(envHost, "/")
+	if serverHost := hostFromServerEnv(c); serverHost != "" {
+		return serverHost
+	}
+	if c != nil && c.IsSet("host") {
+		return normalizeHost(strings.TrimSpace(c.String("host")))
+	}
+	if c != nil {
+		candidate := normalizeHost(strings.TrimSpace(c.String("host")))
+		if candidate != "" && !sameHost(candidate, "http://localhost:1984") {
+			return candidate
+		}
 	}
 	if stored, err := loadStoredAuthConfig(); err == nil && strings.TrimSpace(stored.Host) != "" {
-		return strings.TrimRight(strings.TrimSpace(stored.Host), "/")
+		return normalizeHost(stored.Host)
 	}
-	return "http://localhost:1984"
+	return "http://127.0.0.1:1984"
+}
+
+func normalizeHost(raw string) string {
+	host := strings.TrimSpace(raw)
+	if host == "" {
+		return ""
+	}
+	if !strings.Contains(host, "://") {
+		host = "http://" + host
+	}
+	parsed, err := url.Parse(host)
+	if err != nil {
+		return strings.TrimRight(host, "/")
+	}
+	if strings.EqualFold(strings.TrimSpace(parsed.Hostname()), "localhost") {
+		port := parsed.Port()
+		if port == "" {
+			port = "1984"
+		}
+		parsed.Host = "127.0.0.1:" + port
+	}
+	return strings.TrimRight(parsed.String(), "/")
+}
+
+func envOrConfigValue(c *cli.Command, key string) string {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v != "" {
+		return v
+	}
+	env := loadConfigEnvValues(c)
+	if env == nil {
+		return ""
+	}
+	return strings.TrimSpace(env[key])
+}
+
+func loadConfigEnvValues(c *cli.Command) map[string]string {
+	if c == nil {
+		return nil
+	}
+	spec := strings.TrimSpace(c.String("config"))
+	if spec == "" {
+		return nil
+	}
+
+	configEnvCacheMu.Lock()
+	if cached, ok := configEnvCache[spec]; ok {
+		configEnvCacheMu.Unlock()
+		return cached
+	}
+	configEnvCacheMu.Unlock()
+
+	var raw []byte
+	if strings.HasPrefix(spec, "{") {
+		raw = []byte(spec)
+	} else {
+		b, err := os.ReadFile(spec)
+		if err != nil {
+			return nil
+		}
+		raw = b
+	}
+
+	parsed := struct {
+		Env map[string]interface{} `json:"env"`
+	}{}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return nil
+	}
+	resolved := map[string]string{}
+	for k, v := range parsed.Env {
+		key := strings.TrimSpace(k)
+		if key == "" || v == nil {
+			continue
+		}
+		resolved[key] = strings.TrimSpace(fmt.Sprint(v))
+	}
+
+	configEnvCacheMu.Lock()
+	configEnvCache[spec] = resolved
+	configEnvCacheMu.Unlock()
+
+	return resolved
+}
+
+func hostFromServerEnv(c *cli.Command) string {
+	host := envOrConfigValue(c, "HOST")
+	if host == "" {
+		host = envOrConfigValue(c, "OPEN_CHAT_SERVER_HOST")
+	}
+	if host == "" {
+		return ""
+	}
+	port := envOrConfigValue(c, "PORT")
+	if port == "" {
+		port = envOrConfigValue(c, "OPEN_CHAT_SERVER_PORT")
+	}
+	if port == "" {
+		port = "1984"
+	}
+	return normalizeHost(fmt.Sprintf("http://%s:%s", host, port))
+}
+
+func parseRootCredentials(c *cli.Command) (string, string, bool) {
+	raw := envOrConfigValue(c, "ROOT_CREDENTIALS")
+	if raw == "" {
+		return "", "", false
+	}
+	parts := strings.SplitN(raw, ":", 2)
+	if len(parts) != 2 {
+		return "", "", false
+	}
+	username := strings.TrimSpace(parts[0])
+	password := strings.TrimSpace(parts[1])
+	if username == "" || password == "" || password == "random" || strings.HasPrefix(password, "hashed_") {
+		return "", "", false
+	}
+	return username, password, true
+}
+
+func resolveAutoLoginCredentials(c *cli.Command) (string, string, bool) {
+	username := envOrConfigValue(c, "OPEN_CHAT_USERNAME")
+	password := envOrConfigValue(c, "OPEN_CHAT_PASSWORD")
+	if username != "" && password != "" {
+		return username, password, true
+	}
+	if c != nil {
+		if c.IsSet("username") && c.IsSet("password") {
+			u := strings.TrimSpace(c.String("username"))
+			p := strings.TrimSpace(c.String("password"))
+			if u != "" && p != "" {
+				return u, p, true
+			}
+		}
+	}
+	return parseRootCredentials(c)
+}
+
+func pollServerVersion(host string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 1200*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(host, "/")+"/api/version", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusBadRequest {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func canAutostartForHost(host string) bool {
+	parsed, err := url.Parse(normalizeHost(host))
+	if err != nil {
+		return false
+	}
+	h := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if h == "localhost" || h == "127.0.0.1" || h == "::1" {
+		return true
+	}
+	return net.ParseIP(h) != nil && net.ParseIP(h).IsLoopback()
+}
+
+func hostAndPortFromURL(host string) (string, string, error) {
+	parsed, err := url.Parse(normalizeHost(host))
+	if err != nil {
+		return "", "", err
+	}
+	h := parsed.Hostname()
+	p := parsed.Port()
+	if h == "" {
+		h = "127.0.0.1"
+	}
+	if p == "" {
+		p = "1984"
+	}
+	if strings.EqualFold(h, "localhost") {
+		h = "127.0.0.1"
+	}
+	return h, p, nil
+}
+
+func ensureServerReachable(host string) (bool, error) {
+	if err := pollServerVersion(host); err == nil {
+		return false, nil
+	}
+	if !canAutostartForHost(host) {
+		return false, fmt.Errorf("server at %s is unreachable and cannot be auto-started for non-local host", host)
+	}
+
+	autoServerMu.Lock()
+	defer autoServerMu.Unlock()
+	if autoServerStarted && sameHost(autoServerHost, host) {
+		if autoServerCmd != nil && autoServerCmd.Process != nil {
+			if err := pollServerVersion(host); err == nil {
+				return false, nil
+			}
+		}
+	}
+
+	h, p, err := hostAndPortFromURL(host)
+	if err != nil {
+		return false, err
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return false, err
+	}
+	cmd := exec.Command(exe, "server", "--host", h, "--port", p)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = os.Environ()
+	if runtime.GOOS == "linux" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
+	}
+	if err := cmd.Start(); err != nil {
+		return false, fmt.Errorf("failed to auto-start server: %w", err)
+	}
+
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := pollServerVersion(host); err == nil {
+			autoServerStarted = true
+			autoServerHost = host
+			autoServerCmd = cmd
+			fmt.Printf("Auto-started server for client command at %s\n", host)
+			return true, nil
+		}
+		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			break
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if cmd.Process != nil {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	}
+	return false, fmt.Errorf("auto-started server did not become ready at %s", host)
+}
+
+func createAccessTokenWithSession(host string, sessionID string, tokenName string) (string, error) {
+	body := map[string]interface{}{"name": tokenName}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return "", err
+	}
+	endpoint := strings.TrimRight(host, "/") + "/api/v1/user/access-tokens"
+	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(string(payload)))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", host)
+	req.Header.Set("Cookie", "session_id="+sessionID)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= http.StatusBadRequest {
+		raw, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("access token creation failed: status %s: %s", resp.Status, strings.TrimSpace(string(raw)))
+	}
+	parsed := accessTokenCreateResponse{}
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return "", err
+	}
+	token := strings.TrimSpace(parsed.Token)
+	if token == "" {
+		return "", fmt.Errorf("access token creation returned empty token")
+	}
+	return token, nil
+}
+
+func autoAuthenticateFromRuntimeConfig(c *cli.Command, host string, verbose bool) (string, error) {
+	if token := strings.TrimSpace(c.String("api-token")); token != "" {
+		return token, nil
+	}
+	username, password, ok := resolveAutoLoginCredentials(c)
+	if !ok {
+		return "", errNoAutoAuthCredentials
+	}
+	if _, err := ensureServerReachable(host); err != nil {
+		return "", err
+	}
+	cli := goclient.NewClient(host)
+	if err, sessionID := cli.LoginUser(username, password); err != nil {
+		return "", fmt.Errorf("auto-login failed for %q: %w", username, err)
+	} else {
+		token, tokenErr := createAccessTokenWithSession(host, sessionID, "open-chat-cli-auto")
+		if tokenErr != nil {
+			return "", tokenErr
+		}
+		verifier := goclient.NewClient(host)
+		verifier.SetAccessToken(token)
+		if verifyErr, _ := verifier.GetUserInfo(); verifyErr != nil {
+			return "", fmt.Errorf("auto-generated token is invalid: %w", verifyErr)
+		}
+		if err := saveStoredAuthConfig(storedAuthConfig{
+			Host:        host,
+			AccessToken: token,
+			UpdatedAt:   time.Now().UTC().Format(time.RFC3339),
+		}); err != nil {
+			return "", fmt.Errorf("failed to persist auto-auth token: %w", err)
+		}
+		if verbose {
+			fmt.Printf("Auto-authenticated as %s using config/env credentials.\n", username)
+		}
+		return token, nil
+	}
 }
 
 func buildBrowserAuthURL(host, state, tokenName string) string {
