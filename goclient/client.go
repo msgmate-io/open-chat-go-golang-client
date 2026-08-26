@@ -109,11 +109,12 @@ func NewClient(host string) *Client {
 	client := &Client{
 		host: normalizedHost,
 		apiKeys: map[string]string{
-			"deepinfra": os.Getenv("DEEPINFRA_API_KEY"),
-			"openai":    os.Getenv("OPENAI_API_KEY"),
-			"groq":      os.Getenv("GROQ_API_KEY"),
-			"litellm":   os.Getenv("LITELLM_API_KEY"),
-			"anthropic": os.Getenv("ANTHROPIC_API_KEY"),
+			"deepinfra":       os.Getenv("DEEPINFRA_API_KEY"),
+			"openai":          os.Getenv("OPENAI_API_KEY"),
+			"groq":            os.Getenv("GROQ_API_KEY"),
+			"litellm":         os.Getenv("LITELLM_API_KEY"),
+			"anthropic":       os.Getenv("ANTHROPIC_API_KEY"),
+			"msgmate_cluster": os.Getenv("MSGMATE_CLUSTER_API_KEY"),
 		},
 	}
 	api, err := generatedapi.NewClientWithResponses(normalizedHost, generatedapi.WithRequestEditorFn(client.requestEditor))
