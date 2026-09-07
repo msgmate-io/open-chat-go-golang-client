@@ -115,6 +115,8 @@ func NewClient(host string) *Client {
 			"litellm":         os.Getenv("LITELLM_API_KEY"),
 			"anthropic":       os.Getenv("ANTHROPIC_API_KEY"),
 			"msgmate_cluster": os.Getenv("MSGMATE_CLUSTER_API_KEY"),
+			"openrouter":      os.Getenv("OPENROUTER_API_KEY"),
+			"ionos":           os.Getenv("IONOS_API_KEY"),
 		},
 	}
 	api, err := generatedapi.NewClientWithResponses(normalizedHost, generatedapi.WithRequestEditorFn(client.requestEditor))
