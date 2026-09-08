@@ -21,6 +21,9 @@ type SendMessage struct {
 	Reasoning []string                `json:"reasoning"`
 	MetaData  *map[string]interface{} `json:"meta_data,omitempty"`
 	ToolCalls *[]interface{}          `json:"tool_calls,omitempty"`
+	// DataType selects the stored message type ("text" default, "event" for
+	// system/widget messages such as provider retry indicators).
+	DataType *string `json:"data_type,omitempty"`
 }
 
 type FileAttachment struct {
@@ -277,6 +280,7 @@ func (c *Client) SendChatMessage(chatUUID string, data SendMessage) error {
 		Reasoning: &data.Reasoning,
 		MetaData:  data.MetaData,
 		ToolCalls: data.ToolCalls,
+		DataType:  data.DataType,
 	}
 	resp, err := c.api.PostApiV1ChatsChatUuidMessagesSendWithResponse(context.Background(), chatUUID, body)
 	if err != nil {

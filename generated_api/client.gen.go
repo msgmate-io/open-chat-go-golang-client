@@ -17,6 +17,7 @@ import (
 )
 
 const (
+	BearerAuthScopes  = "BearerAuth.Scopes"
 	SessionAuthScopes = "SessionAuth.Scopes"
 )
 
@@ -86,6 +87,19 @@ type BotsUpdateBotRequest struct {
 	IsActive            *bool                   `json:"is_active,omitempty"`
 	IsPublic            *bool                   `json:"is_public,omitempty"`
 	Name                *string                 `json:"name,omitempty"`
+}
+
+// ChatsChatStateRow defines model for chats.ChatStateRow.
+type ChatsChatStateRow struct {
+	ChatUuid *string `json:"chat_uuid,omitempty"`
+	IsActive *bool   `json:"is_active,omitempty"`
+	Source   *string `json:"source,omitempty"`
+	State    *string `json:"state,omitempty"`
+}
+
+// ChatsChatStatesResponse defines model for chats.ChatStatesResponse.
+type ChatsChatStatesResponse struct {
+	States *[]ChatsChatStateRow `json:"states,omitempty"`
 }
 
 // ChatsCreateChat defines model for chats.CreateChat.
@@ -182,12 +196,17 @@ type ChatsRerunMessageResponse struct {
 
 // ChatsSendMessage defines model for chats.SendMessage.
 type ChatsSendMessage struct {
-	Attachments *[]ChatsFileAttachment  `json:"attachments,omitempty"`
-	MetaData    *map[string]interface{} `json:"meta_data,omitempty"`
-	Reasoning   *[]string               `json:"reasoning,omitempty"`
-	Text        *string                 `json:"text,omitempty"`
-	ToolCalls   *[]interface{}          `json:"tool_calls,omitempty"`
-	ToolInit    *map[string]interface{} `json:"tool_init,omitempty"`
+	Attachments *[]ChatsFileAttachment `json:"attachments,omitempty"`
+
+	// DataType DataType selects the stored message type. Currently supported: "text"
+	// (default) and "event" (system/widget messages such as provider retry
+	// indicators). Unknown values fall back to "text".
+	DataType  *string                 `json:"data_type,omitempty"`
+	MetaData  *map[string]interface{} `json:"meta_data,omitempty"`
+	Reasoning *[]string               `json:"reasoning,omitempty"`
+	Text      *string                 `json:"text,omitempty"`
+	ToolCalls *[]interface{}          `json:"tool_calls,omitempty"`
+	ToolInit  *map[string]interface{} `json:"tool_init,omitempty"`
 }
 
 // ChatsSharedChatPublishResponse defines model for chats.SharedChatPublishResponse.
@@ -259,6 +278,21 @@ type IntegrationsIntegrationAPIRouteOverview struct {
 	Summary      *string                                        `json:"summary,omitempty"`
 }
 
+// IntegrationsIntegrationDefaultBotOverview defines model for integrations.IntegrationDefaultBotOverview.
+type IntegrationsIntegrationDefaultBotOverview struct {
+	AdditionalOwners    *[]string               `json:"additional_owners,omitempty"`
+	DefaultSharedConfig *map[string]interface{} `json:"default_shared_config,omitempty"`
+	Description         *string                 `json:"description,omitempty"`
+	Email               *string                 `json:"email,omitempty"`
+	IsActive            *bool                   `json:"is_active,omitempty"`
+	IsPublic            *bool                   `json:"is_public,omitempty"`
+	Name                *string                 `json:"name,omitempty"`
+	OverwriteIfExists   *bool                   `json:"overwrite_if_exists,omitempty"`
+	PrimaryOwner        *string                 `json:"primary_owner,omitempty"`
+	Username            *string                 `json:"username,omitempty"`
+	UsesRandomPassword  *bool                   `json:"uses_random_password,omitempty"`
+}
+
 // IntegrationsIntegrationFrontendRouteOverview defines model for integrations.IntegrationFrontendRouteOverview.
 type IntegrationsIntegrationFrontendRouteOverview struct {
 	AssetPath   *string `json:"asset_path,omitempty"`
@@ -272,6 +306,7 @@ type IntegrationsIntegrationFrontendRouteOverview struct {
 type IntegrationsIntegrationListRow struct {
 	AdminOnly          *bool   `json:"admin_only,omitempty"`
 	ApiRouteCount      *int    `json:"api_route_count,omitempty"`
+	DefaultBotCount    *int    `json:"default_bot_count,omitempty"`
 	FrontendRouteCount *int    `json:"frontend_route_count,omitempty"`
 	FunctionCount      *int    `json:"function_count,omitempty"`
 	HasRouteRegistrar  *bool   `json:"has_route_registrar,omitempty"`
@@ -302,6 +337,7 @@ type IntegrationsIntegrationModelOverview struct {
 type IntegrationsIntegrationOverviewResponse struct {
 	ApiRoutes         *[]string                                       `json:"api_routes,omitempty"`
 	ApiRoutesOverview *[]IntegrationsIntegrationAPIRouteOverview      `json:"api_routes_overview,omitempty"`
+	DefaultBots       *[]IntegrationsIntegrationDefaultBotOverview    `json:"default_bots,omitempty"`
 	FrontendRoutes    *[]IntegrationsIntegrationFrontendRouteOverview `json:"frontend_routes,omitempty"`
 	Functions         *[]string                                       `json:"functions,omitempty"`
 	Models            *[]IntegrationsIntegrationModelOverview         `json:"models,omitempty"`
@@ -601,6 +637,23 @@ type ToolsToolsFilters struct {
 	Types *[]string `json:"types,omitempty"`
 }
 
+// UserBrowserTokenExchangeRequest defines model for user.BrowserTokenExchangeRequest.
+type UserBrowserTokenExchangeRequest struct {
+	Label      *string   `json:"label,omitempty"`
+	Scopes     *[]string `json:"scopes,omitempty"`
+	TtlSeconds *int      `json:"ttl_seconds,omitempty"`
+}
+
+// UserBrowserTokenExchangeResponse defines model for user.BrowserTokenExchangeResponse.
+type UserBrowserTokenExchangeResponse struct {
+	AccessToken *string   `json:"access_token,omitempty"`
+	ApiBaseUrl  *string   `json:"api_base_url,omitempty"`
+	ExpiresAt   *string   `json:"expires_at,omitempty"`
+	ExpiresIn   *int      `json:"expires_in,omitempty"`
+	Scopes      *[]string `json:"scopes,omitempty"`
+	TokenType   *string   `json:"token_type,omitempty"`
+}
+
 // UserTwoFactorConfirmRequest defines model for user.TwoFactorConfirmRequest.
 type UserTwoFactorConfirmRequest struct {
 	Code   *string `json:"code,omitempty"`
@@ -667,6 +720,12 @@ type GetApiV1ChatsListParams struct {
 
 	// ChatTypes Chat types to filter by
 	ChatTypes *string `form:"chat_types,omitempty" json:"chat_types,omitempty"`
+}
+
+// GetApiV1ChatsStatesParams defines parameters for GetApiV1ChatsStates.
+type GetApiV1ChatsStatesParams struct {
+	// ChatUuids Comma-separated chat UUIDs (max 100)
+	ChatUuids string `form:"chat_uuids" json:"chat_uuids"`
 }
 
 // GetApiV1ChatsChatUuidMessagesListParams defines parameters for GetApiV1ChatsChatUuidMessagesList.
@@ -837,6 +896,9 @@ type PostApiV1ToolsTypingToolNameInitValidateJSONRequestBody PostApiV1ToolsTypin
 // PostApiV1User2faConfirmJSONRequestBody defines body for PostApiV1User2faConfirm for application/json ContentType.
 type PostApiV1User2faConfirmJSONRequestBody = UserTwoFactorConfirmRequest
 
+// PostApiV1UserBrowserTokenJSONRequestBody defines body for PostApiV1UserBrowserToken for application/json ContentType.
+type PostApiV1UserBrowserTokenJSONRequestBody = UserBrowserTokenExchangeRequest
+
 // PostApiV1UserLoginJSONRequestBody defines body for PostApiV1UserLogin for application/json ContentType.
 type PostApiV1UserLoginJSONRequestBody = UserUserLogin
 
@@ -967,6 +1029,9 @@ type ClientInterface interface {
 
 	// GetApiV1ChatsList request
 	GetApiV1ChatsList(ctx context.Context, params *GetApiV1ChatsListParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetApiV1ChatsStates request
+	GetApiV1ChatsStates(ctx context.Context, params *GetApiV1ChatsStatesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetApiV1ChatsChatUuid request
 	GetApiV1ChatsChatUuid(ctx context.Context, chatUuid string, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1197,6 +1262,11 @@ type ClientInterface interface {
 
 	// PostApiV1User2faSetup request
 	PostApiV1User2faSetup(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PostApiV1UserBrowserTokenWithBody request with any body
+	PostApiV1UserBrowserTokenWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	PostApiV1UserBrowserToken(ctx context.Context, body PostApiV1UserBrowserTokenJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PostApiV1UserLoginWithBody request with any body
 	PostApiV1UserLoginWithBody(ctx context.Context, params *PostApiV1UserLoginParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1433,6 +1503,18 @@ func (c *Client) PostApiV1ChatsCreate(ctx context.Context, body PostApiV1ChatsCr
 
 func (c *Client) GetApiV1ChatsList(ctx context.Context, params *GetApiV1ChatsListParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetApiV1ChatsListRequest(c.Server, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) GetApiV1ChatsStates(ctx context.Context, params *GetApiV1ChatsStatesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetApiV1ChatsStatesRequest(c.Server, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2463,6 +2545,30 @@ func (c *Client) PostApiV1User2faSetup(ctx context.Context, reqEditors ...Reques
 	return c.Client.Do(req)
 }
 
+func (c *Client) PostApiV1UserBrowserTokenWithBody(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostApiV1UserBrowserTokenRequestWithBody(c.Server, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+func (c *Client) PostApiV1UserBrowserToken(ctx context.Context, body PostApiV1UserBrowserTokenJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPostApiV1UserBrowserTokenRequest(c.Server, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 func (c *Client) PostApiV1UserLoginWithBody(ctx context.Context, params *PostApiV1UserLoginParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPostApiV1UserLoginRequestWithBody(c.Server, params, contentType, body)
 	if err != nil {
@@ -3181,6 +3287,51 @@ func NewGetApiV1ChatsListRequest(server string, params *GetApiV1ChatsListParams)
 				}
 			}
 
+		}
+
+		queryURL.RawQuery = queryValues.Encode()
+	}
+
+	req, err := http.NewRequest("GET", queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetApiV1ChatsStatesRequest generates requests for GetApiV1ChatsStates
+func NewGetApiV1ChatsStatesRequest(server string, params *GetApiV1ChatsStatesParams) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/chats/states")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		queryValues := queryURL.Query()
+
+		if queryFrag, err := runtime.StyleParamWithLocation("form", true, "chat_uuids", runtime.ParamLocationQuery, params.ChatUuids); err != nil {
+			return nil, err
+		} else if parsed, err := url.ParseQuery(queryFrag); err != nil {
+			return nil, err
+		} else {
+			for k, v := range parsed {
+				for _, v2 := range v {
+					queryValues.Add(k, v2)
+				}
+			}
 		}
 
 		queryURL.RawQuery = queryValues.Encode()
@@ -5645,6 +5796,46 @@ func NewPostApiV1User2faSetupRequest(server string) (*http.Request, error) {
 	return req, nil
 }
 
+// NewPostApiV1UserBrowserTokenRequest calls the generic PostApiV1UserBrowserToken builder with application/json body
+func NewPostApiV1UserBrowserTokenRequest(server string, body PostApiV1UserBrowserTokenJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPostApiV1UserBrowserTokenRequestWithBody(server, "application/json", bodyReader)
+}
+
+// NewPostApiV1UserBrowserTokenRequestWithBody generates requests for PostApiV1UserBrowserToken with any type of body
+func NewPostApiV1UserBrowserTokenRequestWithBody(server string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/user/browser-token")
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("POST", queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewPostApiV1UserLoginRequest calls the generic PostApiV1UserLogin builder with application/json body
 func NewPostApiV1UserLoginRequest(server string, params *PostApiV1UserLoginParams, body PostApiV1UserLoginJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -5912,6 +6103,9 @@ type ClientWithResponsesInterface interface {
 	// GetApiV1ChatsListWithResponse request
 	GetApiV1ChatsListWithResponse(ctx context.Context, params *GetApiV1ChatsListParams, reqEditors ...RequestEditorFn) (*GetApiV1ChatsListResponse, error)
 
+	// GetApiV1ChatsStatesWithResponse request
+	GetApiV1ChatsStatesWithResponse(ctx context.Context, params *GetApiV1ChatsStatesParams, reqEditors ...RequestEditorFn) (*GetApiV1ChatsStatesResponse, error)
+
 	// GetApiV1ChatsChatUuidWithResponse request
 	GetApiV1ChatsChatUuidWithResponse(ctx context.Context, chatUuid string, reqEditors ...RequestEditorFn) (*GetApiV1ChatsChatUuidResponse, error)
 
@@ -6141,6 +6335,11 @@ type ClientWithResponsesInterface interface {
 
 	// PostApiV1User2faSetupWithResponse request
 	PostApiV1User2faSetupWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*PostApiV1User2faSetupResponse, error)
+
+	// PostApiV1UserBrowserTokenWithBodyWithResponse request with any body
+	PostApiV1UserBrowserTokenWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostApiV1UserBrowserTokenResponse, error)
+
+	PostApiV1UserBrowserTokenWithResponse(ctx context.Context, body PostApiV1UserBrowserTokenJSONRequestBody, reqEditors ...RequestEditorFn) (*PostApiV1UserBrowserTokenResponse, error)
 
 	// PostApiV1UserLoginWithBodyWithResponse request with any body
 	PostApiV1UserLoginWithBodyWithResponse(ctx context.Context, params *PostApiV1UserLoginParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostApiV1UserLoginResponse, error)
@@ -6488,6 +6687,30 @@ func (r GetApiV1ChatsListResponse) Status() string {
 
 // StatusCode returns HTTPResponse.StatusCode
 func (r GetApiV1ChatsListResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+type GetApiV1ChatsStatesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *ChatsChatStatesResponse
+	JSON400      *string
+	JSON500      *string
+}
+
+// Status returns HTTPResponse.Status
+func (r GetApiV1ChatsStatesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetApiV1ChatsStatesResponse) StatusCode() int {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.StatusCode
 	}
@@ -7861,6 +8084,30 @@ func (r PostApiV1User2faSetupResponse) StatusCode() int {
 	return 0
 }
 
+type PostApiV1UserBrowserTokenResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	JSON200      *UserBrowserTokenExchangeResponse
+	JSON400      *string
+	JSON403      *string
+}
+
+// Status returns HTTPResponse.Status
+func (r PostApiV1UserBrowserTokenResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PostApiV1UserBrowserTokenResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
 type PostApiV1UserLoginResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -8120,6 +8367,15 @@ func (c *ClientWithResponses) GetApiV1ChatsListWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseGetApiV1ChatsListResponse(rsp)
+}
+
+// GetApiV1ChatsStatesWithResponse request returning *GetApiV1ChatsStatesResponse
+func (c *ClientWithResponses) GetApiV1ChatsStatesWithResponse(ctx context.Context, params *GetApiV1ChatsStatesParams, reqEditors ...RequestEditorFn) (*GetApiV1ChatsStatesResponse, error) {
+	rsp, err := c.GetApiV1ChatsStates(ctx, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetApiV1ChatsStatesResponse(rsp)
 }
 
 // GetApiV1ChatsChatUuidWithResponse request returning *GetApiV1ChatsChatUuidResponse
@@ -8862,6 +9118,23 @@ func (c *ClientWithResponses) PostApiV1User2faSetupWithResponse(ctx context.Cont
 	return ParsePostApiV1User2faSetupResponse(rsp)
 }
 
+// PostApiV1UserBrowserTokenWithBodyWithResponse request with arbitrary body returning *PostApiV1UserBrowserTokenResponse
+func (c *ClientWithResponses) PostApiV1UserBrowserTokenWithBodyWithResponse(ctx context.Context, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostApiV1UserBrowserTokenResponse, error) {
+	rsp, err := c.PostApiV1UserBrowserTokenWithBody(ctx, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostApiV1UserBrowserTokenResponse(rsp)
+}
+
+func (c *ClientWithResponses) PostApiV1UserBrowserTokenWithResponse(ctx context.Context, body PostApiV1UserBrowserTokenJSONRequestBody, reqEditors ...RequestEditorFn) (*PostApiV1UserBrowserTokenResponse, error) {
+	rsp, err := c.PostApiV1UserBrowserToken(ctx, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePostApiV1UserBrowserTokenResponse(rsp)
+}
+
 // PostApiV1UserLoginWithBodyWithResponse request with arbitrary body returning *PostApiV1UserLoginResponse
 func (c *ClientWithResponses) PostApiV1UserLoginWithBodyWithResponse(ctx context.Context, params *PostApiV1UserLoginParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PostApiV1UserLoginResponse, error) {
 	rsp, err := c.PostApiV1UserLoginWithBody(ctx, params, contentType, body, reqEditors...)
@@ -9443,6 +9716,46 @@ func ParseGetApiV1ChatsListResponse(rsp *http.Response) (*GetApiV1ChatsListRespo
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest ChatsListedChatsPage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest string
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest string
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetApiV1ChatsStatesResponse parses an HTTP response from a GetApiV1ChatsStatesWithResponse call
+func ParseGetApiV1ChatsStatesResponse(rsp *http.Response) (*GetApiV1ChatsStatesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetApiV1ChatsStatesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ChatsChatStatesResponse
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -11344,6 +11657,46 @@ func ParsePostApiV1User2faSetupResponse(rsp *http.Response) (*PostApiV1User2faSe
 			return nil, err
 		}
 		response.JSON500 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePostApiV1UserBrowserTokenResponse parses an HTTP response from a PostApiV1UserBrowserTokenWithResponse call
+func ParsePostApiV1UserBrowserTokenResponse(rsp *http.Response) (*PostApiV1UserBrowserTokenResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PostApiV1UserBrowserTokenResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest UserBrowserTokenExchangeResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest string
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest string
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
 
 	}
 
