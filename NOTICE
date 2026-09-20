@@ -1,0 +1,19 @@
+NOTICE
+
+This repository is licensed under the GNU Lesser General Public License,
+version 3.0 or (at your option) any later version (LGPL-3.0-or-later).
+See LICENSE (LGPLv3) and LICENSE.GPL (GPLv3).
+
+The licensing of this project is currently being drafted. The statements
+below describe the intended terms and may change.
+
+Intellectual property
+  All original source code in this repository is the intellectual property
+  of Tim Schupp / Tim Benjamin Software, unless otherwise stated.
+
+Special licensing
+  LGPL-3.0-or-later may not fit every use case. Alternative, special, or
+  commercial licensing can be investigated and provided on request.
+  Contact: tim+licensing@timschupp.de
+
+Third-party dependencies remain under their own respective licenses.
