@@ -1,8 +1,8 @@
 NOTICE
 
-This repository is licensed under the GNU Lesser General Public License,
-version 3.0 or (at your option) any later version (LGPL-3.0-or-later).
-See LICENSE (LGPLv3) and LICENSE.GPL (GPLv3).
+This repository is licensed under the GNU Affero General Public License,
+version 3.0 or (at your option) any later version (AGPL-3.0-or-later).
+See LICENSE for the full license text.
 
 The licensing of this project is currently being drafted. The statements
 below describe the intended terms and may change.
@@ -11,8 +11,18 @@ Intellectual property
   All original source code in this repository is the intellectual property
   of Tim Schupp / Tim Benjamin Software, unless otherwise stated.
 
+Copyright owner exemption
+  Tim Schupp / Tim Benjamin Software is the sole copyright owner and
+  intellectual property holder of this repository and of the OpenChat
+  project. As the copyright owner it is not bound by the terms of the
+  AGPL-3.0-or-later grant that it makes to the public, and reserves the
+  right to use, combine, link, distribute, and keep private its own
+  proprietary modules without being subject to the source-disclosure
+  obligations of AGPLv3. This exemption is personal to Tim Schupp /
+  Tim Benjamin Software and does not extend to any third party.
+
 Special licensing
-  LGPL-3.0-or-later may not fit every use case. Alternative, special, or
+  AGPL-3.0-or-later may not fit every use case. Alternative, special, or
   commercial licensing can be investigated and provided on request.
   Contact: tim+licensing@timschupp.de
 
