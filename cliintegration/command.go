@@ -18,7 +18,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/msgmate-io/go-client-integration/goclient"
@@ -716,9 +715,7 @@ func ensureServerReachable(host string) (bool, error) {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = os.Environ()
-	if runtime.GOOS == "linux" {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGTERM}
-	}
+	configureSysProcAttr(cmd)
 	if err := cmd.Start(); err != nil {
 		return false, fmt.Errorf("failed to auto-start server: %w", err)
 	}
@@ -929,7 +926,7 @@ func promptForUsernameAndPassword() (string, string, error) {
 	username = strings.TrimSpace(username)
 
 	fmt.Print("Password: ")
-	bytePassword, err := term.ReadPassword(int(syscall.Stdin))
+	bytePassword, err := term.ReadPassword(int(os.Stdin.Fd()))
 	if err != nil {
 		return "", "", fmt.Errorf("failed to read password: %w", err)
 	}
@@ -940,7 +937,7 @@ func promptForUsernameAndPassword() (string, string, error) {
 }
 
 func promptForPassword() (string, error) {
-	bytePassword, err := term.ReadPassword(int(syscall.Stdin))
+	bytePassword, err := term.ReadPassword(int(os.Stdin.Fd()))
 	if err != nil {
 		return "", fmt.Errorf("failed to read password: %w", err)
 	}
