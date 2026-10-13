@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"strings"
 
+	"github.com/msgmate-io/go-client-integration/cliintegration"
 	"github.com/msgmate-io/go-integration-interface/integrationinterface"
 )
 
@@ -16,5 +17,11 @@ func init() {
 		AdminOnly:      false,
 		UserAccessible: false,
 		ReadmeMarkdown: strings.TrimSpace(readmeMarkdown),
+		CLICommands: []integrationinterface.CLICommand{
+			{
+				Name:    "client",
+				Command: cliintegration.ClientCli,
+			},
+		},
 	})
 }
